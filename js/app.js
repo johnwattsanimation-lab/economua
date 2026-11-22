@@ -477,18 +477,73 @@ function actualizarResumenChat() {
 let idMsg = 0;
 function agregarMensajes(lista) {
   const cont = raiz.querySelector('#mensajes');
+  let bajar = false;
   for (const msg of lista) {
-    msg.n = ++idMsg; estado.mensajes.push(msg);
+    // Una tarjeta que ya está en el chat se actualiza (en su lugar, o se baja al final si la corregiste escribiendo)
+    if (msg.id) {
+      const i = estado.mensajes.findIndex((x) => x.id === msg.id);
+      if (i >= 0) {
+        msg.n = estado.mensajes[i].n;
+        const el = cont?.querySelector(`[data-tid="${msg.id}"]`);
+        if (msg.mover) { bajar = true; estado.mensajes.splice(i, 1); estado.mensajes.push(msg); el?.remove(); cont?.insertAdjacentHTML('beforeend', htmlMensaje(msg)); }
+        else { estado.mensajes[i] = msg; if (el) el.outerHTML = htmlMensaje(msg); }
+        continue;
+      }
+    }
+    msg.n = ++idMsg; estado.mensajes.push(msg); bajar = true;
     if (cont) cont.insertAdjacentHTML('beforeend', htmlMensaje(msg));
   }
   if (estado.mensajes.length > 120) estado.mensajes.splice(0, estado.mensajes.length - 120);
-  if (cont) cont.scrollTop = cont.scrollHeight;
+  if (cont && bajar) cont.scrollTop = cont.scrollHeight;
+}
+function htmlTarjeta(msg) {
+  const t = msg.tarjeta; const pend = t.estado === 'pendiente';
+  const filas = t.filas.map((f) => `<button type="button" class="t-fila ${f.falta ? 'falta' : ''}" ${pend && !f.fijo ? `data-tc="${t.id}" data-campo="${f.k}"` : 'disabled'}>
+      <span class="t-et">${esc(f.label)}</span><span class="t-val">${md(f.valor)}</span>${pend && !f.fijo ? '<span class="t-lapiz" aria-hidden="true">✏️</span>' : ''}</button>`).join('');
+  const notas = (t.notas || []).map((n) => `<p class="t-nota">${md(n)}</p>`).join('');
+  let botones = '';
+  if (pend) botones = `<div class="t-botones"><button type="button" class="btn prim" data-tacc="confirmar" data-tc="${t.id}" ${t.puedeConfirmar ? '' : 'disabled'}>✅ Confirmar</button><button type="button" class="btn" data-tacc="cancelar" data-tc="${t.id}">✖️ Cancelar</button></div>`;
+  if (t.estado === 'guardado') botones = `<div class="t-botones"><button type="button" class="btn chico" data-tacc="reabrir" data-tc="${t.id}">✏️ Cambiar algo</button><button type="button" class="btn chico" data-tacc="deshacer" data-tc="${t.id}">↩️ Deshacer</button></div>`;
+  return `<div class="msg bot tarjeta-chat ${t.estado}" data-tid="${t.id}" data-n="${msg.n}"><p class="t-titulo">${esc(t.titulo)}</p>${filas ? `<div class="t-filas">${filas}</div>` : ''}${notas}${botones}</div>`;
 }
 function htmlMensaje(msg) {
   if (msg.de === 'yo') return `<div class="msg yo">${esc(msg.texto)}</div>`;
+  if (msg.tarjeta) return htmlTarjeta(msg);
   const sem = msg.semaforo ? `<div class="semaforo ${msg.semaforo}">${msg.semaforo === 'verde' ? '🟢 Bien' : msg.semaforo === 'amarillo' ? '🟡 Cuidado' : '🔴 No conviene'}</div>` : '';
   const chips = msg.chips?.length ? `<div class="chips">${msg.chips.map((c) => `<button type="button" class="chip ${c.estilo === 'peligro' ? 'peligro' : ''}" data-chip="${c.id}" data-msg="${msg.n}" ${c.fecha ? 'data-fecha="1"' : ''} ${msg.usado ? 'disabled' : ''}>${esc(c.label)}</button>`).join('')}</div>` : '';
   return `<div class="msg bot ${msg.semaforo || ''}" data-n="${msg.n}">${sem}${msg.lineas.map((l) => `<p>${md(l)}</p>`).join('')}${chips}</div>`;
+}
+// Editor pequeño debajo del dato que tocaste (sin tapar la pantalla)
+function abrirEditorTarjeta(boton) {
+  const id = boton.dataset.tc, k = boton.dataset.campo;
+  const caja = boton.closest('.tarjeta-chat');
+  const yaAbierto = caja.querySelector(`.t-editor[data-k="${k}"]`);
+  caja.querySelectorAll('.t-editor').forEach((x) => x.remove());
+  if (yaAbierto) return;
+  const info = estado.chat.campo(id, k); if (!info) return;
+  let html = '';
+  if (info.tipo === 'opciones') {
+    html = `<div class="chips">${info.opciones.map((o, i) => `<button type="button" class="chip" data-tv="${i}">${esc(o.label)}</button>`).join('')}</div>`;
+    if (info.extraTexto) html += `<div class="t-entrada"><input type="text" placeholder="${esc(info.extraTexto)}" aria-label="${esc(info.extraTexto)}"><button type="button" class="chip" data-tok="1">Usar</button></div>`;
+  } else if (info.tipo === 'fecha') html = `<div class="t-entrada"><input type="date" value="${esc(info.valor || D.hoyISO())}" aria-label="Fecha"><button type="button" class="chip" data-tok="1">Listo</button></div>`;
+  else html = `<div class="t-entrada"><input type="text" ${info.tipo === 'dinero' ? 'inputmode="decimal" placeholder="$0"' : ''} value="${esc(info.valor ?? '')}" aria-label="Nuevo valor"><button type="button" class="chip" data-tok="1">Listo</button></div>`;
+  boton.insertAdjacentHTML('afterend', `<div class="t-editor" data-k="${k}">${html}</div>`);
+  const ed = caja.querySelector('.t-editor');
+  const aplicar = (msg) => { if (msg) { agregarMensajes([msg]); actualizarResumenChat(); } };
+  ed.querySelectorAll('[data-tv]').forEach((b) => { b.onclick = () => aplicar(estado.chat.poner(id, k, info.opciones[Number(b.dataset.tv)].v)); });
+  const input = ed.querySelector('input'); const ok = ed.querySelector('[data-tok]');
+  if (input && ok) {
+    const enviar = () => { const v = input.value.trim(); if (!v) return; aplicar(info.tipo === 'opciones' ? estado.chat.ponerTexto(id, k, v) : estado.chat.poner(id, k, v)); };
+    ok.onclick = enviar; input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); enviar(); } };
+    if (info.tipo !== 'opciones') { input.focus(); if (input.select) input.select(); }
+  }
+}
+function accionTarjeta(boton) {
+  const id = boton.dataset.tc, a = boton.dataset.tacc;
+  let r = [];
+  try { r = estado.chat[a](id) || []; } catch (e) { console.error(e); r = [{ de: 'bot', lineas: [`Tuve un problema con eso: ${e.message}`] }]; }
+  agregarMensajes(r); actualizarResumenChat();
+  if (a === 'confirmar' || a === 'deshacer') { const cont = raiz.querySelector('#mensajes'); if (cont && r.length > 1) cont.scrollTop = cont.scrollHeight; }
 }
 function enviarChat(texto) {
   if (estado.pantalla !== 'chat') ir('chat');
@@ -513,6 +568,10 @@ function tocarChip(boton, valor) {
 
 // ── Clics (un solo escuchador para toda la app) ──
 raiz.addEventListener('click', async (e) => {
+  const tacc = e.target.closest('[data-tacc]');
+  if (tacc && !tacc.disabled) { accionTarjeta(tacc); return; }
+  const tfila = e.target.closest('.t-fila[data-campo]');
+  if (tfila) { abrirEditorTarjeta(tfila); return; }
   const chip = e.target.closest('[data-chip]');
   if (chip && !chip.disabled) {
     if (chip.dataset.fecha) {

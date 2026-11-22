@@ -169,3 +169,28 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--acento-f); 
 code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; background: var(--fondo); padding: 2px 6px; border-radius: 6px; word-break: break-all; }
 .pasos { padding-left: 20px; margin: 6px 0; } .pasos li { margin: 6px 0; color: var(--txt2); }
 .aviso[hidden], [hidden] { display: none !important; }
+
+/* Pantallas de bloqueo y carga: ocupan todo el ancho también en pantalla grande */
+.bloqueo, .cargando { grid-column: 1 / -1; grid-row: 1 / -1; }
+
+/* ── Tarjeta de confirmación del chat ── */
+.tarjeta-chat { width: min(560px, 92%); }
+.tarjeta-chat .t-titulo { font-weight: 700; margin-bottom: 6px; }
+.tarjeta-chat.pendiente { border-left: 4px solid var(--acento); }
+.tarjeta-chat.guardado { border-left: 4px solid var(--verde); }
+.tarjeta-chat.cancelado, .tarjeta-chat.deshecho { opacity: .7; }
+.t-filas { display: flex; flex-direction: column; gap: 2px; margin: 4px 0 6px; }
+.t-fila { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: var(--panel2); border: 1px solid transparent; border-radius: 9px; padding: 7px 9px; color: var(--txt); }
+.t-fila:not([disabled]):hover { border-color: var(--borde); }
+.t-fila[disabled] { background: transparent; padding: 3px 9px; cursor: default; }
+.t-fila .t-et { color: var(--txt3); font-size: 13px; flex: 0 0 38%; }
+.t-fila .t-val { flex: 1; min-width: 0; overflow-wrap: break-word; }
+.t-fila.falta .t-val { color: var(--amarillo); }
+.t-fila .t-lapiz { font-size: 12px; opacity: .6; }
+.t-editor { padding: 6px 2px 8px; }
+.t-editor .chips { margin-top: 2px; }
+.t-entrada { display: flex; gap: 6px; margin-top: 6px; }
+.t-entrada input { flex: 1; min-width: 0; background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; padding: 8px 10px; }
+.t-nota { font-size: 13px; color: var(--txt2); margin: 4px 0 0; }
+.t-botones { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.t-botones .btn { flex: 1; min-width: 120px; }
