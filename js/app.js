@@ -432,7 +432,7 @@ function render() {
   renderContenido();
 }
 function navActivo(p) {
-  if (p === 'mas') return !['chat', 'resumen', 'movimientos', 'pagos'].includes(estado.pantalla);
+  if (p === 'mas') return !['chat', 'bancos', 'resumen', 'movimientos', 'pagos'].includes(estado.pantalla);
   return estado.pantalla === p;
 }
 function renderContenido() {
@@ -470,8 +470,8 @@ function actualizarResumenChat() {
   const el = raiz.querySelector('#chat-resumen'); if (!el || !estado.db) return;
   const db = estado.db; const h = D.hoyISO();
   const micro = D.sumar(D.microDelMes(db, D.mesDe(h), h)); const tope = D.topeMicro(db, h);
-  el.innerHTML = `<button data-ir="resumen"><span class="et">Tengo</span><span class="val m-dinero">${esc(D.dinero(D.saldoTotal(db)))}</span></button>
-    <button data-ir="pagos"><span class="et">Debo</span><span class="val m-dinero">${esc(D.dinero(D.deudaTotalTarjetas(db) + D.totalesPrestamos(db).debo))}</span></button>
+  el.innerHTML = `<button data-ir="bancos"><span class="et">Tengo</span><span class="val m-dinero">${esc(D.dinero(D.saldoTotal(db)))}</span></button>
+    <button data-ir="bancos"><span class="et">Debo</span><span class="val m-dinero">${esc(D.dinero(D.deudaTotalTarjetas(db) + D.totalesPrestamos(db).debo))}</span></button>
     <button data-ir="resumen"><span class="et">Microgastos del mes</span><span class="val" style="color:${micro > tope ? 'var(--rojo)' : micro > tope * 0.8 ? 'var(--amarillo)' : 'inherit'}"><span class="m-dinero">${esc(D.dinero(micro))}</span> / <span class="m-dinero">${esc(D.dinero(tope))}</span></span></button>`;
 }
 let idMsg = 0;

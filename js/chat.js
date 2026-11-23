@@ -131,41 +131,77 @@ export function crearChat(ctx) {
   const textoOriginal = (palabras) => palabras.map((w) => mapaOriginal[w] || w).join(' ');
 
   // ── Cuentas y tarjetas ──
+  // Palabras que indican ahorro
+  const RE_AHORRO = /\b(ahorr\w*|guardad\w*|guardadito|cajita\w*|colchon|fondo de emergencia|inversion\w*|invertid\w*|plazo fijo|pagare|cetes|rendimiento\w*|alcancia|cochinito|reserva|apartado|apartados)\b/;
   function pagosPosibles() {
-    const out = D.lista(db(), 'cuentas').map((c) => ({ tipo: 'cuenta', id: c.id, nombre: c.nombre, clave: norm(c.nombre), efectivo: c.tipo === 'efectivo' }));
-    for (const t of D.lista(db(), 'tarjetas')) out.push({ tipo: 'tarjeta', id: t.id, nombre: t.nombre, clave: norm(t.nombre) });
+    const out = D.lista(db(), 'cuentas').map((c) => ({ tipo: 'cuenta', id: c.id, nombre: c.nombre, clave: norm(c.nombre), banco: norm(D.bancoDe(c)), bancoNombre: D.bancoDe(c), efectivo: c.tipo === 'efectivo', ahorro: c.tipo === 'ahorro' }));
+    for (const t of D.lista(db(), 'tarjetas')) out.push({ tipo: 'tarjeta', id: t.id, nombre: t.nombre, clave: norm(t.nombre), banco: norm(D.bancoDe(t)), bancoNombre: D.bancoDe(t) });
     return out.sort((a, b) => b.clave.length - a.clave.length);
   }
-  function buscarExistente(t, soloTipo) {
-    for (const p of pagosPosibles()) if ((!soloTipo || p.tipo === soloTipo) && p.clave && new RegExp(`\\b${escRe(p.clave)}\\b`).test(t)) return p;
-    if ((!soloTipo || soloTipo === 'cuenta') && L.PALABRAS_EFECTIVO.test(t)) { const e = pagosPosibles().find((p) => p.efectivo); if (e) return e; }
+  const contiene = (t, clave) => clave && new RegExp(`\\b${escRe(clave)}\\b`).test(t);
+  // Nombre del banco que se menciona (de los tuyos o de los conocidos)
+  function bancoMencionado(t) {
+    const propios = pagosPosibles().filter((p) => !p.efectivo).sort((a, b) => b.banco.length - a.banco.length);
+    for (const p of propios) if (contiene(t, p.banco)) return p.bancoNombre;
+    for (const b of Object.keys(L.BANCOS).sort((a, c) => c.length - a.length)) if (contiene(t, b) && !['twitch', 'kick', 'tiktok', 'patreon'].includes(b)) return L.BANCOS[b];
     return null;
   }
-  // Busca una cuenta mencionada, aunque todavía no exista ("tengo 1500 en mercado pago").
-  function cuentaMencionada(t, soloTipo = 'cuenta') {
-    const ya = buscarExistente(t, soloTipo); if (ya) return ya;
-    const bancos = Object.keys(L.BANCOS).sort((a, b) => b.length - a.length);
-    for (const b of bancos) if (new RegExp(`\\b${escRe(b)}\\b`).test(t) && !['twitch', 'kick', 'tiktok', 'patreon', 'tdc'].includes(b)) return { tipo: soloTipo, nuevo: true, nombre: L.BANCOS[b] };
-    const m = t.match(/\b(?:en|de|desde|a|con)\s+(?:la\s+|el\s+|mi\s+)?(?:cuenta|tarjeta|banco|cartera)\s+(?:de\s+)?([a-z0-9ñ]+(?:\s+[a-z0-9ñ]+)?)/);
-    if (m) { const w = m[1].split(' ').filter((x) => !L.STOP.has(x) && !/^\d+$/.test(x)); if (w.length) return { tipo: soloTipo, nuevo: true, nombre: titulo(textoOriginal(w)) }; }
+  function buscarExistente(t, soloTipo, quiereAhorro = RE_AHORRO.test(t)) {
+    const lista = pagosPosibles().filter((p) => !soloTipo || p.tipo === soloTipo);
+    // 1) por nombre exacto de la cuenta o tarjeta
+    for (const p of lista) if (contiene(t, p.clave) && (soloTipo !== 'cuenta' || !quiereAhorro || p.ahorro || p.efectivo)) return p;
+    // 2) por nombre del banco
+    const porBanco = lista.filter((p) => !p.efectivo && contiene(t, p.banco));
+    if (porBanco.length) {
+      if (soloTipo === 'tarjeta' || (!soloTipo && /\b(tarjeta|credito|tdc)\b/.test(t))) { const tj = porBanco.find((p) => p.tipo === 'tarjeta'); if (tj) return tj; if (soloTipo === 'tarjeta') return null; }
+      const cs = porBanco.filter((p) => p.tipo === 'cuenta');
+      const elegida = quiereAhorro ? cs.find((p) => p.ahorro) : (cs.find((p) => !p.ahorro));
+      if (elegida) return elegida;
+      if (!soloTipo && !quiereAhorro) { const tj = porBanco.find((p) => p.tipo === 'tarjeta'); if (tj) return tj; }
+      return null;
+    }
+    if ((!soloTipo || soloTipo === 'cuenta') && L.PALABRAS_EFECTIVO.test(t) && !quiereAhorro) { const e = pagosPosibles().find((p) => p.efectivo); if (e) return e; }
+    // 3) "mis ahorros" sin banco: si solo hay una cuenta de ahorro, es esa
+    if ((!soloTipo || soloTipo === 'cuenta') && quiereAhorro) { const as = pagosPosibles().filter((p) => p.ahorro); if (as.length === 1) return as[0]; }
     return null;
   }
-  const valorPago = (p) => (!p ? '' : p.nuevo ? `nueva-${p.tipo}:${p.nombre}` : `${p.tipo}:${p.id}`);
+  // Busca una cuenta o tarjeta mencionada, aunque todavía no exista ("tengo 1500 en mercado pago").
+  function cuentaMencionada(t, soloTipo = 'cuenta', quiereAhorro = RE_AHORRO.test(t)) {
+    const ya = buscarExistente(t, soloTipo, quiereAhorro); if (ya) return ya;
+    let banco = bancoMencionado(t);
+    if (!banco) {
+      const m = t.match(/\b(?:en|de|desde|a|con)\s+(?:la\s+|el\s+|mi\s+|mis\s+)?(?:cuenta|tarjeta|banco|cartera|credito)\s+(?:de\s+)?(?:ahorro\s+)?(?:de\s+|en\s+)?([a-z0-9ñ]+(?:\s+[a-z0-9ñ]+)?)/);
+      if (m) { const w = m[1].split(' ').filter((x) => !L.STOP.has(x) && !/^\d+$/.test(x) && !RE_AHORRO.test(x)); if (w.length) banco = titulo(textoOriginal(w)); }
+    }
+    if (!banco && soloTipo === 'cuenta' && quiereAhorro) return { tipo: 'cuenta', nuevo: true, nombre: 'Mis ahorros', tipoCuenta: 'ahorro', banco: 'Mis ahorros' };
+    if (!banco) return null;
+    if (soloTipo === 'tarjeta') return { tipo: 'tarjeta', nuevo: true, nombre: `${banco} Crédito`, banco };
+    if (quiereAhorro) return { tipo: 'cuenta', nuevo: true, nombre: `${banco} Ahorro`, tipoCuenta: 'ahorro', banco };
+    return { tipo: 'cuenta', nuevo: true, nombre: banco, tipoCuenta: /mercado pago|paypal|spin|didi|uala|rappi|klar|stori|^nu$/i.test(banco) ? 'digital' : 'banco', banco };
+  }
+  // Cuenta de un banco (la de ahorro o la de disponible), existente o nueva
+  function cuentaDeBanco(banco, ahorro) {
+    const p = pagosPosibles().find((x) => x.tipo === 'cuenta' && x.banco === norm(banco) && !!x.ahorro === !!ahorro && !x.efectivo);
+    if (p) return p;
+    return ahorro ? { tipo: 'cuenta', nuevo: true, nombre: banco === 'Mis ahorros' ? banco : `${banco} Ahorro`, tipoCuenta: 'ahorro', banco } : { tipo: 'cuenta', nuevo: true, nombre: banco, tipoCuenta: 'banco', banco };
+  }
+  const valorPago = (p) => (!p ? '' : p.nuevo ? `nueva-${p.tipo}:${p.nombre}|${p.tipoCuenta || ''}|${p.banco || p.nombre}` : `${p.tipo}:${p.id}`);
   function leerPago(v) { const [tipo, ...r] = String(v || '').split(':'); return { tipo, id: r.join(':') }; }
   function nombrePagoValor(v) {
     if (!v) return '—';
     const p = leerPago(v);
-    if (p.tipo === 'nueva-cuenta') return `🏦 ${p.id} (cuenta nueva)`;
-    if (p.tipo === 'nueva-tarjeta') return `💳 ${p.id} (tarjeta nueva)`;
+    if (p.tipo === 'nueva-cuenta') { const [n, tc] = p.id.split('|'); return `${tc === 'ahorro' ? '🐷' : '🏦'} ${n} (nueva)`; }
+    if (p.tipo === 'nueva-tarjeta') return `💳 ${p.id.split('|')[0]} (nueva)`;
     if (p.tipo === 'tarjeta') return `💳 ${D.obtener(db(), 'tarjetas', p.id)?.nombre || '¿?'}`;
     if (p.tipo === 'nada') return 'Solo anotar (no movió mis cuentas)';
-    return `🏦 ${D.obtener(db(), 'cuentas', p.id)?.nombre || '¿?'}`;
+    const c = D.obtener(db(), 'cuentas', p.id);
+    return `${c?.tipo === 'ahorro' ? '🐷' : c?.tipo === 'efectivo' ? '💵' : '🏦'} ${c?.nombre || '¿?'}`;
   }
   // Crea la cuenta o tarjeta nueva si hace falta y devuelve {tipo, id}
   function asegurarPago(v, extra = {}) {
     const p = leerPago(v);
-    if (p.tipo === 'nueva-cuenta') { const c = D.guardar(db(), 'cuentas', { nombre: p.id, tipo: /mercado pago|paypal|spin|didi|uala|rappi/i.test(p.id) ? 'digital' : 'banco', saldoInicial: 0 }); return { tipo: 'cuenta', id: c.id, creado: ['cuentas', c.id] }; }
-    if (p.tipo === 'nueva-tarjeta') { const t = D.guardar(db(), 'tarjetas', { nombre: p.id, diaCorte: extra.diaCorte || 1, diaPago: extra.diaPago || 20, deudaInicial: 0 }); return { tipo: 'tarjeta', id: t.id, creado: ['tarjetas', t.id] }; }
+    if (p.tipo === 'nueva-cuenta') { const [nombre, tc, banco] = p.id.split('|'); const c = D.guardar(db(), 'cuentas', { nombre, banco: banco || nombre, tipo: tc || (/mercado pago|paypal|spin|didi|uala|rappi/i.test(nombre) ? 'digital' : 'banco'), saldoInicial: 0 }); return { tipo: 'cuenta', id: c.id, creado: ['cuentas', c.id] }; }
+    if (p.tipo === 'nueva-tarjeta') { const [nombre, , banco] = p.id.split('|'); const t = D.guardar(db(), 'tarjetas', { nombre, banco: banco || nombre, diaCorte: extra.diaCorte || 1, diaPago: extra.diaPago || 20, deudaInicial: 0 }); return { tipo: 'tarjeta', id: t.id, creado: ['tarjetas', t.id] }; }
     return p;
   }
   function pagoPredeterminado() {
@@ -207,8 +243,8 @@ export function crearChat(ctx) {
   const TIPOS = {
     gasto: { nombre: 'Gasto', emoji: '💸', campos: ['monto', 'descripcion', 'categoria', 'pago', 'fecha', 'micro'] },
     ingreso: { nombre: 'Ingreso', emoji: '💰', campos: ['monto', 'descripcion', 'fuente', 'cuenta', 'fecha'] },
-    saldo: { nombre: 'Saldo de una cuenta', emoji: '🏦', campos: ['cuenta', 'monto'] },
-    deuda: { nombre: 'Deuda de una tarjeta', emoji: '💳', campos: ['tarjeta', 'monto'] },
+    saldo: { nombre: 'Lo que tengo en una cuenta o ahorro', emoji: '🏦', campos: ['cuenta', 'operacion', 'monto'] },
+    deuda: { nombre: 'Lo que debo de crédito', emoji: '💳', campos: ['tarjeta', 'operacion', 'monto'] },
     suscripcion: { nombre: 'Suscripción', emoji: '🔁', campos: ['nombre', 'monto', 'frecuencia', 'inicio', 'proxima', 'renueva', 'pago', 'registrarPago'] },
     transferencia: { nombre: 'Pasar dinero entre mis cuentas', emoji: '🔄', campos: ['monto', 'origen', 'destino', 'fecha'] },
     pagoTarjeta: { nombre: 'Pago de tarjeta', emoji: '💳', campos: ['monto', 'tarjeta', 'origen', 'fecha'] },
@@ -221,20 +257,22 @@ export function crearChat(ctx) {
     borrar: { nombre: 'Borrar', emoji: '🗑️', campos: ['movimiento'], sinTipo: true },
   };
   const TIPOS_CAMBIABLES = ['gasto', 'ingreso', 'saldo', 'suscripcion', 'transferencia', 'pagoTarjeta', 'deuda', 'prestamo', 'meta', 'msi'];
-  const etiquetaMonto = (b) => ({ saldo: 'Tengo ahora', deuda: 'Debo ahora', suscripcion: 'Precio', meta: 'Apartar', msi: 'Precio total', reactivarSus: 'Precio' }[b.tipo] || 'Monto');
+  const etiquetaMonto = (b) => ({ saldo: b.operacion && b.operacion !== 'total' ? 'Cantidad' : 'Tengo en total', deuda: b.operacion && b.operacion !== 'total' ? 'Cantidad' : 'Debo en total', suscripcion: 'Precio', meta: 'Apartar', msi: 'Precio total', reactivarSus: 'Precio' }[b.tipo] || 'Monto');
   const opcPago = (incluirTarjetas = true, b) => {
     const op = pagosPosibles().filter((p) => incluirTarjetas || p.tipo === 'cuenta').map((p) => ({ v: `${p.tipo}:${p.id}`, label: `${p.tipo === 'tarjeta' ? '💳' : '🏦'} ${p.nombre}` }));
     for (const k of ['pago', 'cuenta', 'origen', 'destino']) if (b?.[k] && leerPago(b[k]).tipo.startsWith('nueva') && !op.some((o) => o.v === b[k])) op.unshift({ v: b[k], label: nombrePagoValor(b[k]) });
     return op;
   };
   const CAMPOS = {
+    operacion: { label: () => '¿Qué hago?', tipo: 'opciones', ver: (b) => ({ total: b.tipo === 'deuda' ? 'Poner lo que debo en total' : 'Poner lo que tengo en total', sumar: b.tipo === 'deuda' ? 'Sumarle a la deuda' : 'Sumarle', restar: b.tipo === 'deuda' ? 'Restarle (ya pagué)' : 'Restarle' }[b.operacion || 'total']),
+      opciones: (b) => [{ v: 'total', label: b.tipo === 'deuda' ? 'Poner lo que debo en total' : 'Poner lo que tengo en total' }, { v: 'sumar', label: 'Sumarle' }, { v: 'restar', label: b.tipo === 'deuda' ? 'Restarle (ya pagué)' : 'Restarle' }] },
     monto: { label: etiquetaMonto, tipo: 'dinero', ver: (b) => (b.monto != null ? D.dinero(b.monto) : null) },
     descripcion: { label: () => 'Descripción', tipo: 'texto', ver: (b) => b.descripcion || null },
     nombre: { label: () => 'Nombre', tipo: 'texto', ver: (b) => b.nombre || null },
     categoria: { label: () => 'Categoría', tipo: 'opciones', ver: (b) => { const c = D.categoria(db(), b.categoria); return `${c.emoji || ''} ${c.nombre}`; },
       opciones: () => D.lista(db(), 'categorias').sort((a, b) => a.nombre.localeCompare(b.nombre)).map((c) => ({ v: c.id, label: `${c.emoji || ''} ${c.nombre}` })) },
     pago: { label: (b) => (b.tipo === 'suscripcion' ? 'Se paga con' : 'Pagado con'), tipo: 'opciones', ver: (b) => nombrePagoValor(b.pago), opciones: (b) => opcPago(true, b) },
-    cuenta: { label: (b) => (b.tipo === 'saldo' ? 'Cuenta' : 'Entró a'), tipo: 'opciones', ver: (b) => nombrePagoValor(b.cuenta), opciones: (b) => opcPago(false, b), extraTexto: 'Escribe el nombre de una cuenta nueva' },
+    cuenta: { label: (b) => (b.tipo === 'saldo' ? 'Banco / cuenta' : 'Entró a'), tipo: 'opciones', ver: (b) => nombrePagoValor(b.cuenta), opciones: (b) => opcPago(false, b), extraTexto: 'Escribe el nombre de una cuenta nueva' },
     origen: { label: () => 'Sale de', tipo: 'opciones', ver: (b) => nombrePagoValor(b.origen), opciones: (b) => opcPago(false, b) },
     destino: { label: () => 'Llega a', tipo: 'opciones', ver: (b) => nombrePagoValor(b.destino), opciones: (b) => opcPago(false, b) },
     tarjeta: { label: () => 'Tarjeta', tipo: 'opciones', ver: (b) => nombrePagoValor(b.tarjeta), extraTexto: 'Escribe el nombre de una tarjeta nueva',
@@ -268,7 +306,8 @@ export function crearChat(ctx) {
     if (['gasto', 'ingreso', 'transferencia', 'pagoTarjeta', 'prestamo', 'abono', 'msi'].includes(b.tipo) && !b.fecha) b.fecha = h;
     if (b.tipo === 'gasto') { b.pago = b.pago || pagoPredeterminado(); b.categoria = b.categoria || categoriaDe(b.palabras || []) || 'otros'; b.micro = b.micro || 'auto'; b.descripcion = b.descripcion || (b.palabras?.length ? cap(textoOriginal(b.palabras)) : D.categoria(db(), b.categoria).nombre); }
     if (b.tipo === 'ingreso') { b.cuenta = b.cuenta && !leerPago(b.cuenta).tipo.includes('tarjeta') ? b.cuenta : pagoPredeterminado(); b.fuente = b.fuente || 'otros-ing'; b.descripcion = b.descripcion || (b.palabras?.length ? cap(textoOriginal(b.palabras)) : D.fuente(db(), b.fuente).nombre); }
-    if (b.tipo === 'saldo') { if (!b.cuenta || leerPago(b.cuenta).tipo.includes('tarjeta')) b.cuenta = pagoPredeterminado(); }
+    if (b.tipo === 'saldo') { if (!b.cuenta || leerPago(b.cuenta).tipo.includes('tarjeta')) b.cuenta = pagoPredeterminado(); b.operacion = b.operacion || 'total'; }
+    if (b.tipo === 'deuda') b.operacion = b.operacion || 'total';
     if (b.tipo === 'deuda' || b.tipo === 'pagoTarjeta' || b.tipo === 'msi') { if (!b.tarjeta || !leerPago(b.tarjeta).tipo.includes('tarjeta')) { const ts = D.lista(db(), 'tarjetas'); b.tarjeta = ts.length ? `tarjeta:${ts[0].id}` : ''; } }
     if (b.tipo === 'pagoTarjeta' || b.tipo === 'transferencia') b.origen = b.origen || pagoPredeterminado();
     if (b.tipo === 'transferencia' && !b.destino) { const otra = pagosPosibles().find((p) => p.tipo === 'cuenta' && `cuenta:${p.id}` !== b.origen); b.destino = otra ? `cuenta:${otra.id}` : ''; }
@@ -309,10 +348,9 @@ export function crearChat(ctx) {
     }
     const falt = faltantes(b);
     const notas = [];
-    if (b.tipo === 'saldo' && b.cuenta && !leerPago(b.cuenta).tipo.startsWith('nueva')) notas.push(`Antes decía ${D.dinero(D.saldoCuenta(db(), leerPago(b.cuenta).id))}.`);
-    if (b.tipo === 'saldo' && b.cuenta && leerPago(b.cuenta).tipo.startsWith('nueva')) notas.push('Se va a crear esa cuenta con ese saldo.');
-    if (b.tipo === 'deuda' && b.tarjeta && !leerPago(b.tarjeta).tipo.startsWith('nueva')) notas.push(`Antes decía ${D.dinero(D.deudaTarjeta(db(), leerPago(b.tarjeta).id))}. Pon los días de corte y pago en Más → Tarjetas.`);
-    if (b.tipo === 'deuda' && b.tarjeta && leerPago(b.tarjeta).tipo.startsWith('nueva')) notas.push('Se va a crear esa tarjeta. Después pon su día de corte y de pago en Más → Tarjetas.');
+    const nuevoValor = (antes) => (b.operacion === 'sumar' ? antes + (b.monto || 0) : b.operacion === 'restar' ? antes - (b.monto || 0) : (b.monto || 0));
+    if (b.tipo === 'saldo' && b.cuenta) { const nueva = leerPago(b.cuenta).tipo.startsWith('nueva'); const antes = nueva ? 0 : D.saldoCuenta(db(), leerPago(b.cuenta).id); notas.push(nueva ? `Se crea esa cuenta con ${D.dinero(nuevoValor(0))}.` : `Antes: ${D.dinero(antes)} → Después: ${D.dinero(nuevoValor(antes))}.`); }
+    if (b.tipo === 'deuda' && b.tarjeta) { const nueva = leerPago(b.tarjeta).tipo.startsWith('nueva'); const antes = nueva ? 0 : D.deudaTarjeta(db(), leerPago(b.tarjeta).id); notas.push(nueva ? `Se crea ese crédito debiendo ${D.dinero(nuevoValor(0))}. Después pon su día de corte y de pago en Bancos → Más opciones.` : `Antes debías ${D.dinero(antes)} → Después: ${D.dinero(nuevoValor(antes))}.`); }
     if (b.tipo === 'gasto' && b.monto > 0) { const micro = b.micro === 'si' || (b.micro !== 'no' && D.esMicro(db(), { tipo: 'gasto', monto: b.monto, categoria: b.categoria }, hoy())); if (micro) notas.push(`Es microgasto. Llevas ${D.dinero(D.sumar(D.microDelMes(db(), D.mesDe(hoy()), hoy())))} de ${D.dinero(D.topeMicro(db(), hoy()))} este mes.`); }
     if (b.estado === 'pendiente' && falt.length) notas.push(`Falta: ${falt.map((k) => CAMPOS[k]?.label(b).toLowerCase() || k).join(', ')}.`);
     if (b.estado === 'pendiente') notas.push('Toca un dato para cambiarlo, o escríbelo (ej. "no, eran 120").');
@@ -424,15 +462,18 @@ export function crearChat(ctx) {
       case 'saldo': {
         const p = pagoDe(b.cuenta); const antes = copia('cuentas', p.id);
         const c = D.obtener(d, 'cuentas', p.id); const actual = D.saldoCuenta(d, p.id);
-        c.saldoInicial = (Number(c.saldoInicial) || 0) + (b.monto - actual); D.guardar(d, 'cuentas', c);
-        lineas.push(`Ahora tienes en total ${D.dinero(D.saldoTotal(db()))} en tus cuentas.`);
+        const delta = b.operacion === 'sumar' ? b.monto : b.operacion === 'restar' ? -b.monto : b.monto - actual;
+        c.saldoInicial = (Number(c.saldoInicial) || 0) + delta; D.guardar(d, 'cuentas', c);
+        lineas.push(`${c.nombre}: ahora tienes ${D.dinero(D.saldoCuenta(db(), c.id))}. En total: ${D.dinero(D.saldoDisponible(db()))} disponible y ${D.dinero(D.saldoAhorrado(db()))} ahorrado.`);
         return { deshacer: () => { if (antes && !creados.length) D.guardar(db(), 'cuentas', antes); quitarCreados(); }, lineas };
       }
       case 'deuda': {
         const p = pagoDe(b.tarjeta); const antes = copia('tarjetas', p.id);
         const t = D.obtener(d, 'tarjetas', p.id); const actual = D.deudaTarjeta(d, p.id);
-        t.deudaInicial = (Number(t.deudaInicial) || 0) + (b.monto - actual); D.guardar(d, 'tarjetas', t);
-        return { deshacer: () => { if (antes && !creados.length) D.guardar(db(), 'tarjetas', antes); quitarCreados(); } };
+        const deltaD = b.operacion === 'sumar' ? b.monto : b.operacion === 'restar' ? -b.monto : b.monto - actual;
+        t.deudaInicial = (Number(t.deudaInicial) || 0) + deltaD; D.guardar(d, 'tarjetas', t);
+        lineas.push(`${t.nombre}: ahora debes ${D.dinero(D.deudaTarjeta(db(), t.id))}.`);
+        return { lineas, deshacer: () => { if (antes && !creados.length) D.guardar(db(), 'tarjetas', antes); quitarCreados(); } };
       }
       case 'suscripcion': {
         const p = pagoDe(b.pago);
@@ -539,9 +580,17 @@ export function crearChat(ctx) {
     if (tiene(/\b(le|les)\s+(preste|prestamos|fie)\b|\bpreste\b/)) return 'prestamo-meDeben';
     if (tiene(/\b(me|nos)\s+(presto|prestaron|fio|fiaron)\b|\bpedi prestado\b|\bme endeude\b/)) return 'prestamo-debo';
     if (tiene(/\b(me|nos)\s+(deben|debe)\b/)) return 'prestamo-meDeben';
-    // 2) Deuda de tarjeta / deuda con alguien
-    if (tiene(/\b(debo|debemos|adeudo|tengo una deuda|tengo de deuda|mi deuda|la deuda|deuda de|deuda en|le debo)\b/)) {
-      if (tiene(/\b(tarjeta|credito|tdc)\b/) || buscarExistente(t0, 'tarjeta')) return 'deuda';
+    // 1b) Sumar o restar a una cuenta, ahorro o crédito ("súmale 200 a BBVA", "quítale 100 a mis ahorros")
+    const hablaDeCuenta = !!bancoMencionado(t0) || RE_AHORRO.test(t0) || /\b(cuenta|banco|efectivo|cartera|saldo|tarjeta|credito|deuda)\b/.test(t0);
+    const esDeuda = /\b(tarjeta|credito|tdc|deuda|debo)\b/.test(t0);
+    if (a.monto != null && hablaDeCuenta && tiene(/\b(sumale|sumar|suma|agregale|agrega|anadele|anade|aumentale|aumenta|subele|sube|ponle mas|metele)\b/)) return esDeuda ? 'deuda-sumar' : 'saldo-sumar';
+    if (a.monto != null && hablaDeCuenta && tiene(/\b(restale|restar|resta|quitale|bajale|baja|descuentale|descuenta|disminuye|disminuyele)\b/)) return esDeuda ? 'deuda-restar' : 'saldo-restar';
+    // 1c) Meter o sacar dinero de los ahorros (es pasar dinero entre tus cuentas)
+    if (RE_AHORRO.test(t0) && tiene(/\b(saque|sacamos|retire|tome|use|agarre|saco|retiro|ocupe|gaste de)\b/) && !tiene(/\b(tengo|llevo)\b/)) return 'sacarAhorro';
+    if ((hits.some((x) => x.tipo === 'apartar') || tiene(/\b(meti|metimos|deposite|pase|transferi|mande|movi|guarde|aparte|ahorre|separe|puse)\b/)) && (RE_AHORRO.test(t0) || (hits.some((x) => x.tipo === 'apartar') && bancoMencionado(t0))) && !tiene(/\bpara\b/) && !tiene(/\b(tengo|llevo|tenemos)\b/)) return 'meterAhorro';
+    // 2) Deuda de tarjeta / crédito / deuda con alguien
+    if (tiene(/\b(debo|debemos|adeudo|tengo una deuda|tengo de deuda|mi deuda|la deuda|deuda de|deuda en|le debo|deuda con|debiendo|tengo usado|llevo usado|saldo deudor|estoy endeudado)\b/)) {
+      if (tiene(/\b(tarjeta|credito|tdc)\b/) || buscarExistente(t0, 'tarjeta') || bancoMencionado(t0)) return 'deuda';
       if (tiene(/\ble debo\b|\bdebo\b.*\ba\s+[a-z]/)) return 'prestamo-debo';
       return 'deuda';
     }
@@ -552,7 +601,7 @@ export function crearChat(ctx) {
     if (tiene(/\b(cancele|cancelar|cancela|cancelo|cancelamos|di de baja|dar de baja|me di de baja|ya no (voy a )?(pagar|pago|renovar|uso)|desactive|quite la suscripcion|deje de pagar)\b/) && (buscarSuscripcion(t0) || a.esSus)) return 'cancelarSus';
     if (tiene(/\b(reactiv\w*|volvi a|me volvi a|de nuevo|otra vez|reanude|regrese a|renove)\b/) && buscarSuscripcion(t0)) return 'reactivarSus';
     // 5) Pago de tarjeta
-    if (tiene(/\b(pague|abone|liquide|salde|pagamos|cubri|deposite|pago|abono)\b/) && (tiene(/\btarjeta\b/) || (buscarExistente(t0, 'tarjeta') && !a.palabras.filter((w) => !buscarExistente(w, 'tarjeta') && w !== 'tarjeta').length)) && !a.msi) return 'pagoTarjeta';
+    if (tiene(/\b(pague|abone|liquide|salde|pagamos|cubri|deposite|pago|abono)\b/) && (tiene(/\b(tarjeta|credito|tdc)\b/) || (buscarExistente(t0, 'tarjeta') && !a.palabras.filter((w) => !buscarExistente(w, 'tarjeta') && w !== 'tarjeta').length)) && !a.msi) return 'pagoTarjeta';
     // 6) Transferencias entre mis cuentas, cajero
     if (tiene(/\b(saque|retire|sacamos)\b/) && tiene(/\b(cajero|banco|cuenta|retiro)\b/)) return 'retiro';
     if (tiene(/\b(retiro|retire)\b.*\b(efectivo|cajero)\b/)) return 'retiro';
@@ -610,9 +659,23 @@ export function crearChat(ctx) {
         const p = cuentaMencionada(t0, 'cuenta');
         return { tipo: 'saldo', monto, cuenta: p ? valorPago(p) : undefined };
       }
-      case 'deuda': {
-        const p = buscarExistente(t0, 'tarjeta') || (() => { const c = cuentaMencionada(t0, 'tarjeta'); return c ? { ...c, tipo: 'tarjeta' } : null; })();
-        return { tipo: 'deuda', monto, tarjeta: p ? valorPago(p) : undefined };
+      case 'deuda': case 'deuda-sumar': case 'deuda-restar': {
+        const p = cuentaMencionada(t0, 'tarjeta', false);
+        return { tipo: 'deuda', monto, tarjeta: p ? valorPago(p) : undefined, operacion: intencion === 'deuda-sumar' ? 'sumar' : intencion === 'deuda-restar' ? 'restar' : 'total' };
+      }
+      case 'saldo-sumar': case 'saldo-restar': {
+        const p = cuentaMencionada(t0, 'cuenta');
+        return { tipo: 'saldo', monto, cuenta: p ? valorPago(p) : undefined, operacion: intencion === 'saldo-sumar' ? 'sumar' : 'restar' };
+      }
+      case 'meterAhorro': case 'sacarAhorro': {
+        const banco = bancoMencionado(t0);
+        const ahorro = banco ? cuentaDeBanco(banco, true) : (pagosPosibles().find((p) => p.ahorro) || cuentaMencionada(t0, 'cuenta', true));
+        const bancoAhorro = ahorro?.bancoNombre || ahorro?.banco || banco;
+        const disp = (bancoAhorro && pagosPosibles().find((p) => p.tipo === 'cuenta' && !p.ahorro && !p.efectivo && p.banco === norm(bancoAhorro))) || null;
+        const dispValor = disp ? valorPago(disp) : (L.PALABRAS_EFECTIVO.test(t0) ? valorPago(buscarExistente('efectivo', 'cuenta', false)) : pagoPredeterminado());
+        return intencion === 'meterAhorro'
+          ? { tipo: 'transferencia', monto, fecha, origen: dispValor, destino: ahorro ? valorPago(ahorro) : undefined }
+          : { tipo: 'transferencia', monto, fecha, origen: ahorro ? valorPago(ahorro) : undefined, destino: dispValor };
       }
       case 'suscripcion': {
         const s = buscarSuscripcion(t0);
@@ -636,8 +699,8 @@ export function crearChat(ctx) {
         return { tipo: 'transferencia', monto, fecha, origen: o ? valorPago(o) : undefined, destino: de ? valorPago(de) : undefined };
       }
       case 'pagoTarjeta': {
-        const tj = buscarExistente(t0, 'tarjeta');
-        const o = buscarExistente(tj ? t0.replace(new RegExp(`\\b${escRe(tj.clave)}\\b`), ' ') : t0, 'cuenta');
+        const tj = buscarExistente(t0, 'tarjeta') || cuentaMencionada(t0, 'tarjeta', false);
+        const o = buscarExistente(tj && tj.clave ? t0.replace(new RegExp(`\\b${escRe(tj.clave)}\\b`), ' ').replace(new RegExp(`\\b${escRe(tj.banco || '')}\\b`), ' ') : t0.replace(/\b(credito|tarjeta)\b.*$/, ' '), 'cuenta', false);
         return { tipo: 'pagoTarjeta', monto, fecha, tarjeta: tj ? valorPago(tj) : undefined, origen: o ? valorPago(o) : undefined };
       }
       case 'prestamo-meDeben': case 'prestamo-debo': {
@@ -694,6 +757,12 @@ export function crearChat(ctx) {
       else b.fecha = f.fecha;
       resto = f.resto; cambio = true;
     }
+    if (b.tipo === 'saldo' || b.tipo === 'deuda') {
+      if (/\b(sumale|sumar|suma|agregale|agrega|mas)\b/.test(t)) { b.operacion = 'sumar'; cambio = true; }
+      else if (/\b(restale|restar|resta|quitale|menos|pague)\b/.test(t)) { b.operacion = 'restar'; cambio = true; }
+      else if (/\b(en total|total|es lo que tengo|es lo que debo)\b/.test(t)) { b.operacion = 'total'; cambio = true; }
+    }
+    if (b.tipo === 'saldo' && RE_AHORRO.test(t) && !bancoMencionado(t)) { const actual = leerPago(b.cuenta); const c = actual.tipo === 'cuenta' ? D.obtener(db(), 'cuentas', actual.id) : null; const bn = c ? D.bancoDe(c) : (actual.id.split('|')[2] || 'Mis ahorros'); b.cuenta = valorPago(cuentaDeBanco(bn, true)); cambio = true; }
     const fr = extraerFrecuencia(t); if (fr && b.tipo === 'suscripcion') { b.frecuencia = fr; b.proximaManual = false; cambio = true; }
     if (/\b(no se renueva|se cancela|sin renovacion)\b/.test(t)) { b.renueva = false; cambio = true; } else if (/\bse renueva\b/.test(t)) { b.renueva = true; cambio = true; }
     if (/\bno (lo )?registres el pago|no me cobraron|prueba gratis|era gratis\b/.test(t)) { b.registrarPago = false; cambio = true; }
@@ -799,14 +868,29 @@ export function crearChat(ctx) {
       if (!ns.length) return [bot('No tienes negocios en proceso. Agrégalos en Más → Negocios.')];
       return [bot([`📈 Podrías ganar: **${D.dinero(ns.reduce((s, n) => s + (Number(n.ganancia) || 0) - (Number(n.costo) || 0), 0))}**`, ...ns.map((n) => `• ${n.nombre}: ${D.dinero((Number(n.ganancia) || 0) - (Number(n.costo) || 0))}`)])];
     }
-    if (/\b(meta|metas|ahorro|ahorrado|apartado|apartados)\b/.test(t)) {
+    if (RE_AHORRO.test(t) && !bancoMencionado(t)) {
+      const as = D.lista(d, 'cuentas').filter((c) => c.tipo === 'ahorro');
+      if (!as.length) return [bot('No tienes ahorros guardados. Escribe por ejemplo: "tengo ahorrados 2,000 en BBVA".')];
+      return [bot([`🐷 Tienes ahorrado: **${D.dinero(D.saldoAhorrado(d))}**`, ...as.map((c) => `• ${D.bancoDe(c)}: ${D.dinero(D.saldoCuenta(d, c.id))}`)])];
+    }
+    if (/\b(meta|metas)\b/.test(t)) {
       const ms = D.lista(d, 'metas'); if (!ms.length) return [bot('No tienes metas. Escribe por ejemplo: "aparté 500 para la PC".')];
       return [bot(['🎯 Tus metas:', ...ms.map((m) => `• ${m.nombre}: ${D.dinero(m.ahorrado)}${m.objetivo ? ` de ${D.dinero(m.objetivo)}` : ''}`)])];
+    }
+    const banco = bancoMencionado(t);
+    if (banco && /\b(cuanto|que|como|dime|saldo)\b/.test(t)) {
+      const g = D.bancos(d).find((x) => x.nombre.toLowerCase() === banco.toLowerCase());
+      if (!g) return [bot(`No tienes ${banco} guardado. Escribe por ejemplo: "tengo 1,000 en ${banco}".`)];
+      return [bot([`🏦 **${g.nombre}**`, `💵 Disponible: ${D.dinero(g.disponible)}`, ...(g.ahorrado ? [`🐷 Ahorrado: ${D.dinero(g.ahorrado)}`] : []), ...(g.tarjetas.length ? [`💳 Debes de crédito: ${D.dinero(g.deuda)}`] : []), `Total: ${D.dinero(g.neto)}`])];
+    }
+    if (/\b(bancos|cada banco|mis cuentas|cuentas)\b/.test(t)) {
+      const bs = D.bancos(d); if (!bs.length) return [bot('No tienes bancos guardados. Escribe por ejemplo: "tengo 1,000 en Mercado Pago".')];
+      return [bot([`🏦 Tus bancos (disponible ${D.dinero(D.saldoDisponible(d))} · ahorrado ${D.dinero(D.saldoAhorrado(d))} · debes ${D.dinero(D.deudaTotalTarjetas(d))}):`, ...bs.map((g) => `• ${g.nombre}: ${D.dinero(g.disponible)}${g.ahorrado ? ` · ahorro ${D.dinero(g.ahorrado)}` : ''}${g.tarjetas.length ? ` · debes ${D.dinero(g.deuda)}` : ''}`)])];
     }
     const cuenta = buscarExistente(t, 'cuenta');
     if (cuenta) return [bot(`🏦 En ${cuenta.nombre} tienes **${D.dinero(D.saldoCuenta(d, cuenta.id))}**.`)];
     if (/\b(tengo|saldo|saldos|dinero|cuentas|cuenta|banco|bancos|efectivo|lana|feria)\b/.test(t)) {
-      const l = [`🏦 Tienes en total: **${D.dinero(D.saldoTotal(d))}**`];
+      const l = [`🏦 Tienes en total: **${D.dinero(D.saldoTotal(d))}** (disponible ${D.dinero(D.saldoDisponible(d))} · ahorrado ${D.dinero(D.saldoAhorrado(d))})`];
       for (const c of D.lista(d, 'cuentas')) l.push(`• ${c.nombre}: ${D.dinero(D.saldoCuenta(d, c.id))}`);
       l.push(`Libre después de tus pagos: ${D.dinero(D.dineroLibre(d, h))}`);
       return [bot(l)];
@@ -853,8 +937,10 @@ export function crearChat(ctx) {
     mapaOriginal = {};
     for (const w of String(original).split(/\s+/)) { const limpio = w.replace(/[¿?¡!"“”'`´,;:()\[\]{}.]/g, ''); const n = norm(limpio).replace(/[^a-z0-9ñ+-]/g, ''); if (n && limpio) mapaOriginal[n] = limpio; }
     const a = analizar(t0, original);
-    const esCorreccion = /^(no|nop|nel|era|eran|fue|fueron|es|son|cambia|cambialo|cambiale|pon|ponle|ponlo|mejor|perdon|corrijo|correccion|en realidad|mas bien|el dia|la fecha|categoria|nombre|descripcion|con|en|desde|de)\b/.test(t0);
     const intencionPrevia = decidir(a);
+    const corrFuerte = /^(no|nop|nel|era|eran|fue|fueron|es|son|cambia\w*|pon|ponle|ponlo|mejor|perdon|corrijo|correccion|en realidad|mas bien|el dia|la fecha|categoria|nombre|descripcion)\b/.test(t0);
+    const corrDebil = /^(con|en|desde|de)\b/.test(t0) && (t0.split(' ').length <= 4 || !intencionPrevia || intencionPrevia === 'preguntar');
+    const esCorreccion = corrFuerte || corrDebil;
     const pareceNuevo = !esCorreccion && ((intencionPrevia && intencionPrevia !== 'preguntar' && a.monto != null) || L.RE_CONSULTA.test(t0) || /^(cuanto|cuantos|cuanta|cuando|que|cual|cuales|como|dime|muestrame|resumen|ayuda|borra|deshaz|deshacer|hola|buenas)\b/.test(t0));
 
     // 1) ¿Es una corrección de la tarjeta que está esperando confirmación?
@@ -881,7 +967,7 @@ export function crearChat(ctx) {
     // 3) ¿Puedo gastar…?
     if (L.RE_CONSULTA.test(t0) && !/^(cuanto|cuando)\b/.test(t0)) return consulta(a);
     // 4) Preguntas
-    const esPregunta = /^(cuanto|cuantos|cuanta|cuando|que|cual|cuales|como|dime|muestrame|ensename|saldo de|en que|donde)\b/.test(t0) || (/\?\s*$/.test(String(original).trim()) && a.monto == null);
+    const esPregunta = /^(cuanto|cuantos|cuanta|cuando|que|cual|cuales|como|dime|muestrame|ensename|saldo de|en que|donde|ver|mis bancos|mis cuentas|mis ahorros|mis deudas|mis tarjetas|todos mis)\b/.test(t0) || (/\?\s*$/.test(String(original).trim()) && a.monto == null);
     if (esPregunta) return preguntas(t0);
 
     // 5) Entender y armar la tarjeta para confirmar

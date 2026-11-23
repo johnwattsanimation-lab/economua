@@ -1,5 +1,5 @@
 // Economua — trabajador de fondo del cel: funciona sin internet y muestra los avisos de pagos.
-const CACHE = 'economua-v2';
+const CACHE = 'economua-v3';
 const ARCHIVOS = ['./', 'index.html', 'estilos.css', 'config.js', 'manifest.webmanifest', 'js/app.js', 'js/datos.js', 'js/chat.js', 'js/cripto.js', 'js/sync.js', 'js/ui.js', 'js/pantallas.js', 'js/lexico.js', 'iconos/icono-192.png', 'iconos/icono-512.png'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARCHIVOS)).then(() => self.skipWaiting())); });

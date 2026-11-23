@@ -25,8 +25,8 @@ button { cursor: pointer; }
 .estado-sync.alerta { color: var(--amarillo); border-color: #6a5a2a; }
 main { overflow-y: auto; overflow-x: hidden; min-height: 0; }
 .contenido { max-width: 860px; margin: 0 auto; padding: 14px 14px 30px; }
-nav.abajo { display: grid; grid-template-columns: repeat(5, 1fr); background: var(--panel); border-top: 1px solid var(--borde); padding-bottom: var(--seguro-abajo); }
-nav.abajo button, nav.lado button { background: none; border: 0; color: var(--txt3); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 2px 9px; font-size: 12px; }
+nav.abajo { display: grid; grid-template-columns: repeat(6, 1fr); background: var(--panel); border-top: 1px solid var(--borde); padding-bottom: var(--seguro-abajo); }
+nav.abajo button, nav.lado button { background: none; border: 0; color: var(--txt3); display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 1px 9px; font-size: 11px; min-width: 0; }
 nav.abajo button .ic, nav.lado button .ic { font-size: 21px; line-height: 1; }
 nav.abajo button.activo, nav.lado button.activo { color: var(--acento); }
 nav.lado { display: none; }
@@ -194,3 +194,13 @@ code, .mono { font-family: ui-monospace, Consolas, monospace; font-size: 13px; b
 .t-nota { font-size: 13px; color: var(--txt2); margin: 4px 0 0; }
 .t-botones { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
 .t-botones .btn { flex: 1; min-width: 120px; }
+
+/* ── Bancos ── */
+.tarjeta.banco { padding: 10px 12px; }
+.banco-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+.banco-cab h2 { margin: 0; }
+.banco-neto { font-weight: 700; white-space: nowrap; } .banco-neto small { color: var(--txt3); font-weight: 400; }
+.tarjeta.banco .fila { padding: 9px 4px; }
+.tarjeta.banco .t-lapiz { font-size: 12px; opacity: .6; }
+
+.aviso { width: max-content; }

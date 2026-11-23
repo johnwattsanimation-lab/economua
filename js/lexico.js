@@ -67,6 +67,7 @@ const VERBOS = {
   },
   llegar: { llegar: {}, entrar: {}, caer: { 1: 'caigo', 3: 'cae caen cayo cayeron' }, caerme: {}, llover: { 3: 'llueve llovio' } },
   saldo: {
+    sobrar: {}, acumular: {},
     tener: { 1: 'tengo tienes tuve tuvimos tenia tendre tenemos', 3: 'tiene tienen tuvo tuvieron tenia tendra' }, traer: { 1: 'traigo traes traje trajimos', 3: 'trae traen trajo trajeron' },
     disponer: { 1: 'dispongo', 3: 'dispone' }, quedar: {}, haber: { 3: 'hay habia habra' }, conservar: {}, poseer: { 1: 'poseo', 3: 'posee' },
   },
@@ -101,7 +102,11 @@ export const FRASES_INGRESO = ['me llego', 'me llegaron', 'me entro', 'me entrar
   'bono de', 'aguinaldo de', 'comision de', 'propina de', 'propinas de', 'regalias de', 'venta de', 'ventas de', 'donacion de', 'donaciones de', 'me tocaron', 'me toco de'];
 export const FRASES_SALDO = ['tengo', 'traigo', 'me quedan', 'me queda', 'quedan', 'queda', 'hay', 'cuento con', 'dispongo de', 'mi saldo', 'saldo de', 'saldo en', 'el saldo',
   'tengo ahorrado', 'tengo guardado', 'tengo juntado', 'llevo ahorrado', 'llevo juntado', 'tengo disponible', 'disponible en', 'tiene mi cuenta', 'mi cuenta tiene', 'en mi cuenta hay',
-  'tengo en', 'esta en', 'estan en', 'traigo en', 'cuento con', 'contamos con', 'cuenta con'];
+  'tengo en', 'esta en', 'estan en', 'traigo en', 'cuento con', 'contamos con', 'cuenta con',
+  'tengo de ahorro', 'tengo de ahorros', 'mis ahorros son', 'mis ahorros', 'en mis ahorros', 'en la cajita', 'en mi cajita', 'en el apartado', 'tengo invertido', 'tengo invertidos',
+  'tengo en el banco', 'me sobra', 'me sobran', 'sobran', 'tengo disponible', 'saldo disponible', 'queda en', 'tengo acumulado', 'tengo acumulados', 'tengo reunido', 'tengo reunidos',
+  'llevo guardado', 'llevo guardados', 'tengo guardados', 'tengo ahorrados', 'tengo juntados', 'tengo apartado', 'tengo apartados', 'mi cuenta trae', 'en la cuenta hay', 'en mi cuenta tengo',
+  'cuento ahorita con', 'ahorita tengo', 'ahora tengo', 'actualmente tengo', 'tengo un saldo de', 'tengo saldo de', 'el saldo es', 'mi saldo es', 'saldo actual', 'balance', 'mi balance'];
 export const PALABRAS_INGRESO = new Set(['sueldo', 'quincena', 'nomina', 'salario', 'bono', 'aguinaldo', 'comision', 'comisiones', 'propinas', 'regalias', 'ganancia', 'ganancias',
   'utilidad', 'utilidades', 'ingreso', 'ingresos', 'entrada', 'donacion', 'donaciones', 'subs', 'bits', 'regalitos', 'diamantes', 'monedas', 'patrocinio', 'patrocinios', 'pago', 'cobro',
   'reembolso', 'devolucion', 'premio', 'herencia', 'finiquito', 'liquidacion', 'utilidades', 'rendimiento', 'rendimientos', 'intereses', 'dividendos', 'cashback', 'beca', 'apoyo', 'pension']);

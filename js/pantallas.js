@@ -5,15 +5,15 @@ import * as S from './sync.js';
 import { esc, m, aviso, editorHTML, leerEditor, numeroValido } from './ui.js';
 
 export const NAV = {
-  abajo: [['chat', '💬', 'Chat'], ['resumen', '📊', 'Resumen'], ['movimientos', '📒', 'Movimientos'], ['pagos', '📅', 'Pagos'], ['mas', '☰', 'Más']],
-  lado: [['chat', '💬', 'Chat'], ['resumen', '📊', 'Resumen'], ['movimientos', '📒', 'Movimientos'], ['pagos', '📅', 'Pagos'], '-',
+  abajo: [['chat', '💬', 'Chat'], ['bancos', '🏦', 'Bancos'], ['resumen', '📊', 'Resumen'], ['movimientos', '📒', 'Historial'], ['pagos', '📅', 'Pagos'], ['mas', '☰', 'Más']],
+  lado: [['chat', '💬', 'Chat'], ['bancos', '🏦', 'Bancos y ahorros'], ['resumen', '📊', 'Resumen'], ['movimientos', '📒', 'Movimientos'], ['pagos', '📅', 'Pagos'], '-',
     ['cuentas', '🏦', 'Cuentas'], ['tarjetas', '💳', 'Tarjetas de crédito'], ['msi', '🗓️', 'Meses sin intereses'], ['suscripciones', '🔁', 'Suscripciones'], ['fijos', '🏠', 'Gastos fijos'],
     ['negocios', '📈', 'Negocios'], ['prestamos', '🤝', 'Préstamos'], ['metas', '🎯', 'Metas'], '-', ['categorias', '🏷️', 'Categorías'], ['fuentes', '💰', 'Fuentes de ingreso'], ['ajustes', '⚙️', 'Ajustes'], ['conexion', '🔒', 'Conexión y seguridad']],
 };
-export const TITULOS = { resumen: 'Resumen', movimientos: 'Movimientos', pagos: 'Pagos y fechas', mas: 'Más', cuentas: 'Cuentas', tarjetas: 'Tarjetas de crédito', msi: 'Meses sin intereses',
+export const TITULOS = { bancos: 'Bancos', resumen: 'Resumen', movimientos: 'Movimientos', pagos: 'Pagos y fechas', mas: 'Más', cuentas: 'Cuentas', tarjetas: 'Tarjetas de crédito', msi: 'Meses sin intereses',
   suscripciones: 'Suscripciones', fijos: 'Gastos fijos', negocios: 'Negocios', prestamos: 'Préstamos', metas: 'Metas y apartados', categorias: 'Categorías', fuentes: 'Fuentes de ingreso', ajustes: 'Ajustes', conexion: 'Conexión y seguridad' };
 
-const TIPOS_CUENTA = [['banco', 'Banco'], ['efectivo', 'Efectivo'], ['digital', 'Cartera digital (Mercado Pago, PayPal…)'], ['ahorro', 'Ahorro / inversión']];
+const TIPOS_CUENTA = [['banco', 'Dinero disponible (cuenta de banco)'], ['digital', 'Dinero disponible (cartera digital: Mercado Pago, PayPal…)'], ['ahorro', 'Ahorro / inversión (no cuenta como dinero libre)'], ['efectivo', 'Efectivo']];
 const ESTADOS_NEGOCIO = [['idea', 'Idea'], ['proceso', 'En proceso'], ['cobrado', 'Cobrado'], ['descartado', 'Descartado']];
 const ESTADOS_SUS = [['activa', 'Activa'], ['cancelada', 'Cancelada (ya no se renueva)'], ['terminada', 'Terminada (guardada para reactivar)']];
 
@@ -47,6 +47,7 @@ export function crearPantallas(app) {
       campos: (r) => [
         { k: 'nombre', label: 'Nombre (como la vas a llamar en el chat)', tipo: 'texto' },
         { k: 'tipo', label: 'Tipo', tipo: 'select', opciones: TIPOS_CUENTA },
+        { k: 'banco', label: 'Banco (para agruparla en Bancos)', tipo: 'texto', ayuda: 'Ej. BBVA. Si lo dejas vacío se usa el nombre.' },
         r.id ? { k: 'saldoActual', label: 'Saldo actual', tipo: 'dinero', ayuda: 'Si no coincide con tu banco, escribe el saldo real y se corrige.' } : { k: 'saldoActual', label: 'Cuánto tienes ahora', tipo: 'dinero' },
       ],
       valores: (r) => ({ ...r, saldoActual: r.id ? Math.round(D.saldoCuenta(db(), r.id) * 100) / 100 : '' }),
@@ -54,17 +55,18 @@ export function crearPantallas(app) {
         if (!v.nombre) return 'Ponle un nombre.';
         const actual = r.id && db().col.cuentas[r.id] && !db().col.cuentas[r.id].del ? D.saldoCuenta(db(), r.id) : 0;
         const ini = Number(r.saldoInicial) || 0;
-        r.nombre = v.nombre; r.tipo = v.tipo;
+        r.nombre = v.nombre; r.tipo = v.tipo; r.banco = v.banco || '';
         if (numeroValido(v.saldoActual)) r.saldoInicial = ini + (v.saldoActual - actual);
         else if (!r.id) r.saldoInicial = 0;
       },
-      fila: (r) => ({ emo: r.tipo === 'efectivo' ? '💵' : r.tipo === 'digital' ? '📱' : r.tipo === 'ahorro' ? '🐷' : '🏦', titulo: r.nombre, sub: esc(TIPOS_CUENTA.find((t) => t[0] === r.tipo)?.[1] || ''), cant: m(D.saldoCuenta(db(), r.id)) }),
+      fila: (r) => ({ emo: r.tipo === 'efectivo' ? '💵' : r.tipo === 'digital' ? '📱' : r.tipo === 'ahorro' ? '🐷' : '🏦', titulo: r.nombre, sub: `${esc(D.bancoDe(r))} · ${r.tipo === 'ahorro' ? 'Ahorro' : r.tipo === 'efectivo' ? 'Efectivo' : 'Disponible'}`, cant: m(D.saldoCuenta(db(), r.id)) }),
       antesDeBorrar: (r) => (D.movimientos(db()).some((x) => x.cuenta === r.id || x.destino === r.id) ? 'Esta cuenta tiene movimientos. Si la borras, esos movimientos se quedan pero sin cuenta.' : null),
     },
     tarjetas: {
       nombre: 'tarjeta', texto: 'Te avisa la fecha de corte y cuánto pagar para no generar intereses.',
       campos: (r) => [
         { k: 'nombre', label: 'Nombre (ej. Nu, BBVA Azul)', tipo: 'texto' },
+        { k: 'banco', label: 'Banco (para agruparla en Bancos)', tipo: 'texto', ayuda: 'Ej. Mercado Pago. Si lo dejas vacío se usa el nombre.' },
         { k: 'limite', label: 'Límite de crédito', tipo: 'dinero' },
         { k: 'diaCorte', label: 'Día de corte', tipo: 'dia' },
         { k: 'diaPago', label: 'Día límite de pago', tipo: 'dia' },
@@ -77,7 +79,7 @@ export function crearPantallas(app) {
         if (!(v.diaCorte >= 1 && v.diaCorte <= 31) || !(v.diaPago >= 1 && v.diaPago <= 31)) return 'El día de corte y el de pago deben ser del 1 al 31.';
         const actual = r.id && db().col.tarjetas[r.id] && !db().col.tarjetas[r.id].del ? D.deudaTarjeta(db(), r.id) : 0;
         const ini = Number(r.deudaInicial) || 0;
-        Object.assign(r, { nombre: v.nombre, limite: v.limite, diaCorte: v.diaCorte, diaPago: v.diaPago, tasa: v.tasa });
+        Object.assign(r, { nombre: v.nombre, banco: v.banco || '', limite: v.limite, diaCorte: v.diaCorte, diaPago: v.diaPago, tasa: v.tasa });
         if (numeroValido(v.deudaActual)) r.deudaInicial = ini + (v.deudaActual - actual); else if (!r.id) r.deudaInicial = 0;
       },
       fila: (r) => ({ emo: '💳', titulo: r.nombre, sub: `Corte día ${r.diaCorte} · Pago día ${r.diaPago} · Sin intereses: ${m(D.pagoSinIntereses(db(), r.id, hoy()))}`, cant: m(D.deudaTarjeta(db(), r.id)), cantSub: r.limite ? `de ${m(r.limite)}` : '' }),
@@ -234,6 +236,62 @@ export function crearPantallas(app) {
     return html;
   }
 
+
+  // ───────── Bancos y ahorros ─────────
+  function pantallaBancos() {
+    const d = db(); const ab = E.abierto; const mes = D.mesDe(hoy());
+    const bs = D.bancos(d);
+    const disp = D.saldoDisponible(d), aho = D.saldoAhorrado(d), deu = D.deudaTotalTarjetas(d);
+    const editorAjuste = (tipo, r) => `<div class="editor" data-editor="ajuste">
+        <div class="campo"><label for="aj-monto">${tipo === 'tarjeta' ? 'Cantidad (lo que debes)' : 'Cantidad'}</label><input id="aj-monto" inputmode="decimal" placeholder="$0" autocomplete="off"></div>
+        <p class="error" id="error-editor"></p>
+        <div class="botones">
+          <button class="btn prim" data-acc="banco-ajustar" data-modo="total" data-tipo="${tipo}" data-id="${r.id}">${tipo === 'tarjeta' ? 'Debo esto en total' : 'Tengo esto en total'}</button>
+          <button class="btn" data-acc="banco-ajustar" data-modo="sumar" data-tipo="${tipo}" data-id="${r.id}">${tipo === 'tarjeta' ? 'Sumar a la deuda' : 'Sumar'}</button>
+          <button class="btn" data-acc="banco-ajustar" data-modo="restar" data-tipo="${tipo}" data-id="${r.id}">${tipo === 'tarjeta' ? 'Restar (ya pagué)' : 'Restar'}</button>
+          <button class="btn" data-acc="cancelar">Cancelar</button>
+          <button class="btn chico" data-acc="banco-opciones" data-tipo="${tipo}" data-id="${r.id}">Más opciones (nombre, tipo, días…)</button>
+        </div></div>`;
+    const filaCuenta = (c, g) => {
+      const id = `aj:${c.id}`;
+      const etiqueta = c.tipo === 'ahorro' ? '🐷 Ahorro' : c.tipo === 'efectivo' ? '💵 Efectivo' : '💵 Disponible';
+      const varias = g.cuentas.filter((x) => (x.tipo === 'ahorro') === (c.tipo === 'ahorro')).length > 1;
+      return `<div class="fila tocable" data-acc="${ab === id ? 'cancelar' : 'banco-editar'}" data-id="${id}" role="button" tabindex="0"><div class="txt"><b>${etiqueta}${varias ? ` · ${esc(c.nombre)}` : ''}</b></div><div class="cant">${m(c.saldo)}</div><span class="t-lapiz">✏️</span></div>${ab === id ? editorAjuste('cuenta', c) : ''}`;
+    };
+    const filaTarjeta = (t) => {
+      const id = `aj:${t.id}`;
+      return `<div class="fila tocable" data-acc="${ab === id ? 'cancelar' : 'banco-editar'}" data-id="${id}" role="button" tabindex="0"><div class="txt"><b>💳 Crédito${t.nombre && t.nombre !== D.bancoDe(t) && t.nombre !== `${D.bancoDe(t)} Crédito` ? ` · ${esc(t.nombre)}` : ''}</b><span>Debes${t.limite ? ` · límite ${m(t.limite)}, disponible ${m(Number(t.limite) - t.deuda)}` : ''}</span></div><div class="cant">${m(t.deuda)}</div><span class="t-lapiz">✏️</span></div>${ab === id ? editorAjuste('tarjeta', t) : ''}`;
+    };
+    let html = `<div class="cuadros">
+      <div class="cuadro"><div class="et">💵 Disponible</div><div class="val">${m(disp)}</div><div class="sub">Para gastar</div></div>
+      <div class="cuadro"><div class="et">🐷 Ahorrado</div><div class="val">${m(aho)}</div><div class="sub">No cuenta como libre</div></div>
+      <div class="cuadro"><div class="et">💳 Debo de crédito</div><div class="val">${m(deu)}</div><div class="sub">Tarjetas y créditos</div></div>
+      <div class="cuadro"><div class="et">Total</div><div class="val" style="color:${disp + aho - deu < 0 ? 'var(--rojo)' : 'inherit'}">${m(disp + aho - deu)}</div><div class="sub">Tengo − debo</div></div></div>`;
+    if (ab === 'nuevo-banco') {
+      html += `<div class="editor" data-editor="banco-nuevo">${editorHTML([
+        { k: 'nombre', label: 'Nombre del banco (ej. BBVA, Mercado Pago, Nu)', tipo: 'texto', ancho: true },
+        { k: 'disponible', label: '💵 Dinero disponible', tipo: 'dinero' },
+        { k: 'ahorro', label: '🐷 Ahorrado (vacío si no tienes)', tipo: 'dinero' },
+        { k: 'deuda', label: '💳 Debo de crédito (vacío si no tienes)', tipo: 'dinero' },
+        { k: 'limite', label: 'Límite de crédito (opcional)', tipo: 'dinero' },
+      ], {}, 'nb')}<p class="error" id="error-editor"></p>
+      <div class="botones"><button class="btn prim" data-acc="banco-crear">Agregar banco</button><button class="btn" data-acc="cancelar">Cancelar</button></div>
+      <p class="nota">Si tiene crédito, después pon su día de corte y de pago (tócalo → Más opciones).</p></div>`;
+    } else html += `<button class="btn-agregar" data-acc="banco-nuevo">+ Agregar banco</button>`;
+    if (!bs.length) return html + '<div class="vacio">Todavía no tienes bancos. Agrégalos aquí o escríbelo en el chat: "tengo 1,000 en Mercado Pago".</div>';
+    for (const g of bs) {
+      const mv = D.movimientoBanco(d, g.nombre, mes);
+      const ordenadas = [...g.cuentas].sort((a, b) => (a.tipo === 'ahorro') - (b.tipo === 'ahorro'));
+      const tieneAhorro = g.cuentas.some((c) => c.tipo === 'ahorro'); const esEfectivo = g.nombre === 'Efectivo';
+      html += `<div class="tarjeta banco"><div class="banco-cab"><h2>${esEfectivo ? '💵' : '🏦'} ${esc(g.nombre)}</h2><div class="banco-neto"><small>Total</small> ${m(g.neto)}</div></div>
+        ${ordenadas.map((c) => filaCuenta(c, g)).join('')}${g.tarjetas.map(filaTarjeta).join('')}
+        ${mv.entro || mv.salio ? `<p class="nota" style="margin:8px 4px 0">Este mes: entró ${m(mv.entro)} · salió ${m(mv.salio)}${mv.categorias.length ? ` · más en ${esc(D.categoria(d, mv.categorias[0][0]).nombre)} (${m(mv.categorias[0][1])})` : ''}</p>` : ''}
+        ${esEfectivo ? '' : `<div class="botones">${!tieneAhorro ? `<button class="btn chico" data-acc="banco-agregar" data-que="ahorro" data-banco="${esc(g.nombre)}">+ Ahorro en ${esc(g.nombre)}</button>` : ''}${!g.tarjetas.length ? `<button class="btn chico" data-acc="banco-agregar" data-que="credito" data-banco="${esc(g.nombre)}">+ Crédito en ${esc(g.nombre)}</button>` : ''}${!g.cuentas.some((c) => c.tipo !== 'ahorro') ? `<button class="btn chico" data-acc="banco-agregar" data-que="disponible" data-banco="${esc(g.nombre)}">+ Dinero disponible en ${esc(g.nombre)}</button>` : ''}</div>`}
+      </div>`;
+    }
+    return html + '<p class="nota">También lo puedes decir en el chat: "tengo 1,000 en Mercado Pago", "tengo ahorrados 200 en BBVA", "debo 10 mil de crédito en Mercado Pago".</p>';
+  }
+
   // ───────── Resumen ─────────
   function pantallaResumen() {
     const d = db(); const h = hoy(); const mes = D.mesDe(h);
@@ -252,7 +310,7 @@ export function crearPantallas(app) {
     const pr = D.totalesPrestamos(d);
     return `
       <div class="cuadros">
-        <div class="cuadro"><div class="et">Tengo</div><div class="val">${m(tengo)}</div><div class="sub">En ${D.lista(d, 'cuentas').length} cuenta(s)</div></div>
+        <div class="cuadro"><div class="et">Tengo</div><div class="val">${m(tengo)}</div><div class="sub">Disponible ${m(D.saldoDisponible(d))} · Ahorrado ${m(D.saldoAhorrado(d))}</div></div>
         <div class="cuadro"><div class="et">Debo</div><div class="val">${m(deudas)}</div><div class="sub">Tarjetas y préstamos</div></div>
         <div class="cuadro"><div class="et">Libre</div><div class="val" style="color:${libre < 0 ? 'var(--rojo)' : 'inherit'}">${m(libre)}</div><div class="sub">Después de pagos y apartados</div></div>
         <div class="cuadro"><div class="et">Lo que valgo</div><div class="val">${m(D.patrimonio(d))}</div><div class="sub">Tengo + me deben − debo</div></div>
@@ -347,7 +405,7 @@ export function crearPantallas(app) {
   // ───────── Más ─────────
   function pantallaMas() {
     const d = db();
-    const items = [['cuentas', '🏦', 'Cuentas', `${D.lista(d, 'cuentas').length} · ${D.dinero(D.saldoTotal(d))}`], ['tarjetas', '💳', 'Tarjetas de crédito', `${D.lista(d, 'tarjetas').length} · debes ${D.dinero(D.deudaTotalTarjetas(d))}`],
+    const items = [['bancos', '🏦', 'Bancos y ahorros', `${D.bancos(d).length} banco(s)`], ['cuentas', '🏦', 'Cuentas', `${D.lista(d, 'cuentas').length} · ${D.dinero(D.saldoTotal(d))}`], ['tarjetas', '💳', 'Tarjetas de crédito', `${D.lista(d, 'tarjetas').length} · debes ${D.dinero(D.deudaTotalTarjetas(d))}`],
       ['msi', '🗓️', 'Meses sin intereses', `${D.lista(d, 'msi').length} compra(s)`], ['suscripciones', '🔁', 'Suscripciones', `${D.dinero(D.costoMensualSuscripciones(d))} al mes`], ['fijos', '🏠', 'Gastos fijos', `${D.lista(d, 'fijos').length} gasto(s)`],
       ['negocios', '📈', 'Negocios', 'Lo que podría ganar'], ['prestamos', '🤝', 'Préstamos', 'Quién me debe y a quién le debo'], ['metas', '🎯', 'Metas y apartados', `${D.lista(d, 'metas').length} meta(s)`],
       ['categorias', '🏷️', 'Categorías', 'Y palabras del chat'], ['fuentes', '💰', 'Fuentes de ingreso', 'Twitch, Kick, TikTok…'], ['ajustes', '⚙️', 'Ajustes', 'Microgastos, avisos, nombre'], ['conexion', '🔒', 'Conexión y seguridad', 'Drive, contraseña, notificaciones']];
@@ -420,6 +478,7 @@ export function crearPantallas(app) {
   function html(p) {
     const titulo = (t) => `<div class="titulo-pantalla"><h2>${esc(t)}</h2></div>`;
     switch (p) {
+      case 'bancos': return pantallaBancos();
       case 'resumen': return titulo(`Resumen de ${D.nombreMes(D.mesDe(hoy()))}`) + pantallaResumen();
       case 'movimientos': return pantallaMovimientos();
       case 'pagos': return pantallaPagos();
@@ -521,6 +580,44 @@ export function crearPantallas(app) {
         const mt = { ...D.obtener(d, 'metas', id) }; const antes = { ...mt };
         mt.ahorrado = Math.max(0, (Number(mt.ahorrado) || 0) + (a === 'meta-apartar' ? monto : -monto)); D.guardar(d, 'metas', mt);
         app.render(); listo(a === 'meta-apartar' ? `Apartaste ${D.dinero(monto)} para ${mt.nombre}` : `Sacaste ${D.dinero(monto)} de ${mt.nombre}`, () => D.guardar(db(), 'metas', antes)); return;
+      }
+      case 'banco-nuevo': app.abrir('nuevo-banco'); return;
+      case 'banco-editar': app.abrir(id); return;
+      case 'banco-ajustar': {
+        const v = Number(String(document.getElementById('aj-monto')?.value || '').replace(/[$\s,]/g, ''));
+        if (!isFinite(v) || String(document.getElementById('aj-monto')?.value || '').trim() === '') return errorEditor('Escribe la cantidad.');
+        const tipo = el.dataset.tipo; const modo = el.dataset.modo;
+        const col = tipo === 'tarjeta' ? 'tarjetas' : 'cuentas'; const campoIni = tipo === 'tarjeta' ? 'deudaInicial' : 'saldoInicial';
+        const r = { ...D.obtener(d, col, id) }; const antes = { ...r };
+        const actual = tipo === 'tarjeta' ? D.deudaTarjeta(d, id) : D.saldoCuenta(d, id);
+        const delta = modo === 'total' ? v - actual : modo === 'sumar' ? v : -v;
+        r[campoIni] = (Number(r[campoIni]) || 0) + delta; D.guardar(d, col, r);
+        const nuevo = actual + delta;
+        app.cerrar(); listo(tipo === 'tarjeta' ? `${r.nombre}: ahora debes ${D.dinero(nuevo)}` : `${r.nombre}: ahora tienes ${D.dinero(nuevo)}`, () => D.guardar(db(), col, antes));
+        return;
+      }
+      case 'banco-opciones': { const col = el.dataset.tipo === 'tarjeta' ? 'tarjetas' : 'cuentas'; E.pantalla = col; E.abierto = id; history.replaceState({ p: col, abierto: id }, ''); app.render(); return; }
+      case 'banco-crear': {
+        const v = leerEditorAbierto();
+        if (!v.nombre) return errorEditor('Escribe el nombre del banco.');
+        if (D.bancos(d).some((g) => g.nombre.toLowerCase() === v.nombre.trim().toLowerCase())) return errorEditor('Ese banco ya está. Tócalo en la lista para cambiar sus cantidades.');
+        const nombre = v.nombre.trim(); const creados = [];
+        const digital = /mercado pago|paypal|spin|didi|uala|rappi|klar|stori|nu\b/i.test(nombre);
+        creados.push(['cuentas', D.guardar(d, 'cuentas', { nombre, banco: nombre, tipo: digital ? 'digital' : 'banco', saldoInicial: Number(v.disponible) || 0 }).id]);
+        if (numeroValido(v.ahorro) && v.ahorro > 0) creados.push(['cuentas', D.guardar(d, 'cuentas', { nombre: `${nombre} Ahorro`, banco: nombre, tipo: 'ahorro', saldoInicial: v.ahorro }).id]);
+        if ((numeroValido(v.deuda) && v.deuda > 0) || (numeroValido(v.limite) && v.limite > 0)) creados.push(['tarjetas', D.guardar(d, 'tarjetas', { nombre: `${nombre} Crédito`, banco: nombre, limite: v.limite || null, diaCorte: 1, diaPago: 20, deudaInicial: Number(v.deuda) || 0 }).id]);
+        app.cerrar(); listo(`Agregué ${nombre}`, () => { for (const [c, cid] of creados) D.borrar(db(), c, cid); });
+        return;
+      }
+      case 'banco-agregar': {
+        const banco = el.dataset.banco; const que = el.dataset.que;
+        let rec;
+        if (que === 'ahorro') rec = D.guardar(d, 'cuentas', { nombre: `${banco} Ahorro`, banco, tipo: 'ahorro', saldoInicial: 0 });
+        else if (que === 'disponible') rec = D.guardar(d, 'cuentas', { nombre: banco, banco, tipo: /mercado pago|paypal|spin|nu\b/i.test(banco) ? 'digital' : 'banco', saldoInicial: 0 });
+        else rec = D.guardar(d, 'tarjetas', { nombre: `${banco} Crédito`, banco, diaCorte: 1, diaPago: 20, deudaInicial: 0 });
+        app.guardar(); app.abrir(`aj:${rec.id}`);
+        aviso(que === 'credito' ? 'Escribe cuánto debes. Después pon sus días de corte y pago en "Más opciones".' : 'Escribe cuánto tienes y toca "Tengo esto en total".');
+        return;
       }
       case 'ajustes-guardar': {
         const v = leerEditorAbierto();

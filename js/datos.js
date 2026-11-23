@@ -202,6 +202,32 @@ export function saldoCuenta(db, id) {
   return s;
 }
 export function saldoTotal(db) { return lista(db, 'cuentas').reduce((t, c) => t + saldoCuenta(db, c.id), 0); }
+export const esAhorro = (c) => c.tipo === 'ahorro';
+export function saldoDisponible(db) { return lista(db, 'cuentas').filter((c) => !esAhorro(c)).reduce((t, c) => t + saldoCuenta(db, c.id), 0); }
+export function saldoAhorrado(db) { return lista(db, 'cuentas').filter(esAhorro).reduce((t, c) => t + saldoCuenta(db, c.id), 0); }
+
+// ───────── Bancos: cada banco con su dinero disponible, sus ahorros y su crédito ─────────
+export function bancoDe(r) { return (r.banco || '').trim() || (r.tipo === 'efectivo' ? 'Efectivo' : r.nombre); }
+export function bancos(db) {
+  const mapa = new Map();
+  const grupo = (nombre) => { const k = nombre.toLowerCase(); if (!mapa.has(k)) mapa.set(k, { nombre, cuentas: [], tarjetas: [], disponible: 0, ahorrado: 0, deuda: 0, limite: 0 }); return mapa.get(k); };
+  for (const c of lista(db, 'cuentas')) { const g = grupo(bancoDe(c)); const s = saldoCuenta(db, c.id); g.cuentas.push({ ...c, saldo: s }); if (esAhorro(c)) g.ahorrado += s; else g.disponible += s; }
+  for (const t of lista(db, 'tarjetas')) { const g = grupo(bancoDe(t)); const d = deudaTarjeta(db, t.id); g.tarjetas.push({ ...t, deuda: d }); g.deuda += Math.max(0, d); g.limite += Number(t.limite) || 0; }
+  const out = [...mapa.values()].map((g) => ({ ...g, neto: g.disponible + g.ahorrado - g.deuda }));
+  return out.sort((a, b) => (a.nombre === 'Efectivo') - (b.nombre === 'Efectivo') || (b.disponible + b.ahorrado + b.deuda) - (a.disponible + a.ahorrado + a.deuda) || a.nombre.localeCompare(b.nombre));
+}
+// Entró y salió este mes por banco (para saber a dónde se va el dinero)
+export function movimientoBanco(db, banco, mes) {
+  const ids = new Set([...lista(db, 'cuentas').filter((c) => bancoDe(c).toLowerCase() === banco.toLowerCase()).map((c) => c.id), ...lista(db, 'tarjetas').filter((t) => bancoDe(t).toLowerCase() === banco.toLowerCase()).map((t) => t.id)]);
+  let entro = 0, salio = 0; const cats = {};
+  for (const m of movimientos(db)) {
+    if (mesDe(m.fecha || '') !== mes) continue;
+    const v = Number(m.monto) || 0;
+    if (m.tipo === 'ingreso' && ids.has(m.cuenta)) entro += v;
+    if (m.tipo === 'gasto' && ids.has(m.cuenta)) { salio += v; cats[m.categoria || 'otros'] = (cats[m.categoria || 'otros'] || 0) + v; }
+  }
+  return { entro, salio, categorias: Object.entries(cats).sort((a, b) => b[1] - a[1]) };
+}
 
 export function deudaTarjeta(db, id) {
   const t = obtener(db, 'tarjetas', id); if (!t) return 0;
@@ -385,7 +411,8 @@ export function porPagar(db, hoy = hoyISO()) {
   items.sort((a, b) => a.fecha.localeCompare(b.fecha));
   return { items, total: items.reduce((s, i) => s + i.monto, 0) };
 }
-export function dineroLibre(db, hoy = hoyISO()) { return saldoTotal(db) - porPagar(db, hoy).total - totalApartado(db); }
+// Lo libre no cuenta tus ahorros (ese dinero es para guardar, no para gastar)
+export function dineroLibre(db, hoy = hoyISO()) { return saldoDisponible(db) - porPagar(db, hoy).total - totalApartado(db); }
 
 // ───────── ¿Puedo gastar? ─────────
 export function consultarGasto(db, monto, categoria, hoy = hoyISO()) {
